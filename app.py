@@ -35,7 +35,7 @@ HTML = """
 </style>
 
 <div class="card">
-  <h2>Webpage Translator</h2>
+  <h2>🔥 Webpage Translator (Updated) 🔥</h2>
   <p>Paste a webpage URL and choose a target language.</p>
 
   <form method="post" onsubmit="this.querySelector('button').innerText='Translating…';">
