@@ -8,7 +8,7 @@ from openai import OpenAI
 # App setup
 # --------------------
 app = Flask(__name__)
-client = OpenAI()  # Uses OPENAI_API_KEY from environment (Render / local)
+client = OpenAI()  # Uses OPENAI_API_KEY from environment
 
 LAST_REQUEST_TIME = 0
 MAX_CHARS = 2000
@@ -18,59 +18,167 @@ MAX_CHARS = 2000
 # --------------------
 HTML = """
 <!doctype html>
-<title>Webpage Translator</title>
+<html>
+<head>
+  <title>Webpage Translator</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
 
-<style>
-  body {
-    font-family: Arial, sans-serif;
-    background: #f2f2f2;
-  }
-  .card {
-    background: white;
-    width: 520px;
-    margin: 60px auto;
-    padding: 24px;
-    border-radius: 8px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-  }
-  input, button {
-    width: 100%;
-    padding: 10px;
-    font-size: 14px;
-    margin-top: 6px;
-  }
-  button {
-    cursor: pointer;
-  }
-</style>
+  <style>
+    * { box-sizing: border-box; }
 
-<div class="card">
-  <h2>🔥 Webpage Translator 🔥</h2>
-  <p>Paste a webpage URL and enter any target language.</p>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial;
+      background: linear-gradient(135deg, #f5f7fa, #e4e7eb);
+      min-height: 100vh;
+      margin: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
 
-  <form method="post" onsubmit="this.querySelector('button').innerText='Translating…';">
-    <label>Webpage URL</label>
-    <input name="url" placeholder="https://example.com" required>
+    .container {
+      width: 100%;
+      max-width: 560px;
+      background: white;
+      padding: 32px;
+      border-radius: 14px;
+      box-shadow: 0 12px 30px rgba(0,0,0,0.12);
+    }
 
-    <br><br>
+    h1 {
+      text-align: center;
+      margin-bottom: 6px;
+    }
 
-    <label>Translate to</label>
-    <input name="language" placeholder="e.g. Chinese, Japanese, French, Thai" required>
+    .subtitle {
+      text-align: center;
+      color: #666;
+      font-size: 14px;
+      margin-bottom: 24px;
+    }
 
-    <br><br>
-    <button type="submit">Translate</button>
-  </form>
+    .tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 20px;
+    }
 
-  {% if error %}
-    <p style="color:red; margin-top:15px;"><b>Error:</b> {{ error }}</p>
-  {% endif %}
+    .tab {
+      flex: 1;
+      padding: 10px;
+      text-align: center;
+      border-radius: 8px;
+      background: #f1f1f1;
+      cursor: pointer;
+      font-weight: 600;
+    }
 
-  {% if result %}
-    <hr>
-    <h3>Translation Result</h3>
-    <pre style="white-space: pre-wrap;">{{ result }}</pre>
-  {% endif %}
-</div>
+    .tab.active {
+      background: #4f46e5;
+      color: white;
+    }
+
+    label {
+      font-weight: 600;
+      margin-bottom: 6px;
+      display: block;
+    }
+
+    input, textarea {
+      width: 100%;
+      padding: 12px;
+      border-radius: 8px;
+      border: 1px solid #ccc;
+      margin-bottom: 18px;
+      font-size: 14px;
+    }
+
+    textarea {
+      resize: vertical;
+      min-height: 120px;
+    }
+
+    button {
+      width: 100%;
+      padding: 14px;
+      border-radius: 10px;
+      border: none;
+      background: #4f46e5;
+      color: white;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .error {
+      background: #fee2e2;
+      color: #991b1b;
+      padding: 12px;
+      border-radius: 8px;
+      margin-top: 18px;
+    }
+
+    pre {
+      background: #f9fafb;
+      padding: 14px;
+      border-radius: 8px;
+      white-space: pre-wrap;
+      margin-top: 12px;
+    }
+
+    .hidden { display: none; }
+  </style>
+
+  <script>
+    function switchMode(mode) {
+      document.getElementById("urlBox").classList.toggle("hidden", mode !== "url");
+      document.getElementById("textBox").classList.toggle("hidden", mode !== "text");
+
+      document.getElementById("tab-url").classList.toggle("active", mode === "url");
+      document.getElementById("tab-text").classList.toggle("active", mode === "text");
+    }
+  </script>
+</head>
+
+<body>
+  <div class="container">
+    <h1>🔥 Webpage Translator</h1>
+    <div class="subtitle">Translate a webpage OR paste text directly</div>
+
+    <div class="tabs">
+      <div id="tab-url" class="tab active" onclick="switchMode('url')">🌐 URL</div>
+      <div id="tab-text" class="tab" onclick="switchMode('text')">✍️ Text</div>
+    </div>
+
+    <form method="post" onsubmit="this.querySelector('button').innerText='Translating…';">
+
+      <div id="urlBox">
+        <label>Webpage URL</label>
+        <input name="url" placeholder="https://example.com">
+      </div>
+
+      <div id="textBox" class="hidden">
+        <label>Paste text</label>
+        <textarea name="text" placeholder="Paste text here..."></textarea>
+      </div>
+
+      <label>Translate to</label>
+      <input name="language" placeholder="e.g. Chinese, Japanese, French" required>
+
+      <button type="submit">Translate</button>
+    </form>
+
+    {% if error %}
+      <div class="error">{{ error }}</div>
+    {% endif %}
+
+    {% if result %}
+      <h3>Result</h3>
+      <pre>{{ result }}</pre>
+    {% endif %}
+  </div>
+</body>
+</html>
 """
 
 # --------------------
@@ -91,42 +199,40 @@ def home():
             return render_template_string(HTML, result=None, error=error)
         LAST_REQUEST_TIME = now
 
-        # ---- Get inputs ----
+        # ---- Inputs ----
         url = request.form.get("url", "").strip()
+        user_text = request.form.get("text", "").strip()
         target_language = request.form.get("language", "").strip()
 
-        if not url:
-            error = "Please enter a webpage URL."
+        if not url and not user_text:
+            error = "Please enter a URL or paste text."
             return render_template_string(HTML, result=None, error=error)
 
-        if not target_language:
-            error = "Please specify a target language."
+        if url and user_text:
+            error = "Please use only one input method."
             return render_template_string(HTML, result=None, error=error)
 
         try:
-            # ---- Fetch webpage ----
-            headers = {"User-Agent": "Mozilla/5.0"}
-            response = requests.get(url, headers=headers, timeout=10)
-            response.raise_for_status()
+            # ---- Get text ----
+            if user_text:
+                text = user_text[:MAX_CHARS]
+            else:
+                headers = {"User-Agent": "Mozilla/5.0"}
+                response = requests.get(url, headers=headers, timeout=10)
+                response.raise_for_status()
 
-            soup = BeautifulSoup(response.text, "html.parser")
+                soup = BeautifulSoup(response.text, "html.parser")
 
-            # Remove junk tags
-            for tag in soup(["script", "style", "noscript", "header", "footer", "nav"]):
-                tag.decompose()
+                for tag in soup(["script", "style", "noscript", "header", "footer", "nav"]):
+                    tag.decompose()
 
-            content = soup.find("article") or soup.find("main")
-            text = " ".join(
-                content.stripped_strings if content else soup.stripped_strings
-            )
+                content = soup.find("article") or soup.find("main")
+                text = " ".join(
+                    content.stripped_strings if content else soup.stripped_strings
+                )
+                text = text[:MAX_CHARS]
 
-            text = text[:MAX_CHARS]
-
-            if not text.strip():
-                error = "No readable text found on this webpage."
-                return render_template_string(HTML, result=None, error=error)
-
-            # ---- OpenAI Translation ----
+            # ---- OpenAI ----
             ai_response = client.responses.create(
                 model="gpt-4.1-mini",
                 input=[
@@ -145,14 +251,13 @@ def home():
 
         except requests.exceptions.RequestException:
             error = "Unable to access the webpage. It may block automated access."
-
-        except Exception as e:
-            error = f"Unexpected error: {str(e)}"
+        except Exception:
+            error = "Unexpected error occurred during translation."
 
     return render_template_string(HTML, result=result, error=error)
 
 # --------------------
-# Run
+# Run (Render-compatible)
 # --------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
