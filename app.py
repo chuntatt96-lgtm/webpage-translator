@@ -1,9 +1,10 @@
 import time
+import csv
 import requests
 from bs4 import BeautifulSoup
 from flask import Flask, request, render_template_string
 from openai import OpenAI
-from datetime import date
+from datetime import date, datetime
 
 # --------------------
 # App setup
@@ -14,8 +15,21 @@ client = OpenAI()  # Uses OPENAI_API_KEY from environment
 MAX_CHARS = 3000
 DAILY_LIMIT = 10  # per IP per day
 
-# In-memory usage tracking (OK for v1)
+# In-memory daily usage tracking
 USAGE = {}  # { ip: { "date": yyyy-mm-dd, "count": int } }
+
+# --------------------
+# Usage logging (CSV)
+# --------------------
+def log_usage(ip, mode, char_count):
+    with open("usage_log.csv", "a", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow([
+            datetime.utcnow().isoformat(),
+            ip,
+            mode,
+            char_count
+        ])
 
 # --------------------
 # HTML Template
@@ -190,8 +204,7 @@ HTML = """
   <div class="intro">
     <b>What is Aly?</b><br>
     Aly helps you instantly translate webpages or text into any language.
-    It’s perfect for reading articles, researching foreign sites, or sharing content across languages —
-    no setup, no learning curve.
+    Perfect for research, reading foreign articles, or quick understanding.
   </div>
 
   <div class="tabs">
@@ -234,13 +247,16 @@ HTML = """
   {% endif %}
 
   <footer>
-    © 2026 Aly • Built with curiosity ☕
+    © 2026 Aly • Built thoughtfully ☕
   </footer>
 </div>
 </body>
 </html>
 """
 
+# --------------------
+# Route
+# --------------------
 @app.route("/", methods=["GET", "POST"])
 def home():
     today = date.today().isoformat()
@@ -259,9 +275,7 @@ def home():
     if request.method == "POST":
         if USAGE[ip]["count"] >= DAILY_LIMIT:
             error = "Aly needs a short break 💤 Come back tomorrow!"
-            return render_template_string(
-                HTML, error=error, remaining=0
-            )
+            return render_template_string(HTML, error=error, remaining=0)
 
         url = request.form.get("url", "").strip()
         user_text = request.form.get("text", "").strip()
@@ -278,6 +292,7 @@ def home():
         try:
             if user_text:
                 text = user_text[:MAX_CHARS]
+                mode = "text"
             else:
                 headers = {"User-Agent": "Mozilla/5.0"}
                 response = requests.get(url, headers=headers, timeout=10)
@@ -290,9 +305,10 @@ def home():
                     content.stripped_strings if content else soup.stripped_strings
                 )
                 text = text[:MAX_CHARS]
+                mode = "url"
 
             if not text.strip():
-                error = "Aly couldn’t find readable text there 🤔 Try pasting text instead."
+                error = "Aly couldn’t find readable text 🤔 Try pasting text instead."
                 return render_template_string(HTML, error=error, remaining=remaining)
 
             char_count = len(text)
@@ -306,8 +322,11 @@ def home():
             )
 
             result = ai_response.output_text
+
+            # Track usage
             USAGE[ip]["count"] += 1
             remaining -= 1
+            log_usage(ip, mode, char_count)
 
         except requests.exceptions.RequestException:
             error = "That website blocked Aly 🚫 Try pasting the text instead."
