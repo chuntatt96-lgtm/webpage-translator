@@ -1,6 +1,5 @@
 import time
 import csv
-import os
 import tempfile
 from datetime import date, datetime
 
@@ -20,10 +19,10 @@ DAILY_LIMIT = 10
 RATE_LIMIT_SECONDS = 4
 
 LAST_REQUEST_TIME = 0
-USAGE = {}  # { ip: { "date": yyyy-mm-dd, "count": int } }
+USAGE = {}  # { ip: {date, count} }
 
 # --------------------
-# Usage logging (CSV)
+# Usage logging
 # --------------------
 def log_usage(ip, mode, char_count):
     with open("usage_log.csv", "a", newline="", encoding="utf-8") as f:
@@ -36,141 +35,172 @@ def log_usage(ip, mode, char_count):
         ])
 
 # --------------------
-# HTML (Playful Aly UI)
+# HTML — Professional SaaS UI
 # --------------------
 HTML = """
 <!doctype html>
-<title>Aly Translator</title>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Aly — AI Translator</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
 
 <style>
+:root {
+  --bg: #f8fafc;
+  --card: #ffffff;
+  --text: #0f172a;
+  --muted: #64748b;
+  --border: #e5e7eb;
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+}
+
+* { box-sizing: border-box; }
+
 body {
-  font-family: "Segoe UI", Arial, sans-serif;
-  background: linear-gradient(135deg, #fdfbfb, #ebedee);
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+  background: var(--bg);
+  color: var(--text);
 }
+
+.container {
+  max-width: 760px;
+  margin: 64px auto;
+  padding: 0 20px;
+}
+
 .card {
-  background: white;
-  width: 620px;
-  margin: 40px auto;
-  padding: 28px;
-  border-radius: 16px;
-  box-shadow: 0 14px 36px rgba(0,0,0,0.15);
+  background: var(--card);
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  padding: 32px;
 }
-h2 { margin-top: 0; }
+
+.header {
+  margin-bottom: 28px;
+}
+
+.header h1 {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 700;
+}
+
+.header p {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 15px;
+}
+
 .tabs {
   display: flex;
-  gap: 10px;
-  margin-bottom: 18px;
+  gap: 8px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 24px;
 }
+
 .tab {
-  flex: 1;
-  padding: 10px;
-  text-align: center;
-  border-radius: 10px;
-  background: #f0f0f0;
+  padding: 10px 14px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--muted);
   cursor: pointer;
-  font-weight: 600;
+  border-bottom: 2px solid transparent;
 }
+
 .tab.active {
-  background: #ff6b6b;
-  color: white;
+  color: var(--primary);
+  border-bottom-color: var(--primary);
 }
-input, textarea, button {
+
+.label {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.hint {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: -6px;
+  margin-bottom: 14px;
+}
+
+input, textarea {
   width: 100%;
-  padding: 12px;
-  margin-top: 8px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
   font-size: 14px;
 }
-textarea { resize: vertical; }
+
+textarea {
+  resize: vertical;
+  min-height: 120px;
+}
+
 button {
-  margin-top: 16px;
-  background: #ff6b6b;
-  color: white;
+  margin-top: 20px;
+  padding: 12px 18px;
+  border-radius: 8px;
   border: none;
-  border-radius: 10px;
+  background: var(--primary);
+  color: white;
+  font-size: 14px;
+  font-weight: 600;
   cursor: pointer;
-  font-size: 16px;
-  font-weight: bold;
 }
-button:hover { background: #ff5252; }
+
+button:hover {
+  background: var(--primary-hover);
+}
+
 .hidden { display: none; }
+
 .error {
-  color: #b00020;
-  margin-top: 14px;
+  margin-top: 20px;
+  padding: 12px;
+  border-radius: 8px;
+  background: #fef2f2;
+  color: #991b1b;
+  font-size: 14px;
 }
+
+.result {
+  margin-top: 28px;
+}
+
 pre {
-  white-space: pre-wrap;
-  background: #fafafa;
+  background: #f9fafb;
+  border: 1px solid var(--border);
+  border-radius: 8px;
   padding: 16px;
-  border-radius: 10px;
+  white-space: pre-wrap;
+  font-size: 14px;
+  line-height: 1.55;
 }
+
 .meta {
-  font-size: 13px;
-  color: #666;
-  margin-top: 8px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--muted);
 }
+
 footer {
   text-align: center;
-  margin-top: 26px;
+  margin-top: 36px;
   font-size: 12px;
-  color: #888;
+  color: var(--muted);
 }
 </style>
 
-<div class="card">
-  <h2>✨ Aly</h2>
-  <p>Your friendly AI for translating <b>websites, text & audio</b> 🌍</p>
-
-  <div class="tabs">
-    <div class="tab active" onclick="showTab('web', this)">🌐 Web</div>
-    <div class="tab" onclick="showTab('text', this)">✍️ Text</div>
-    <div class="tab" onclick="showTab('audio', this)">🔊 Audio</div>
-  </div>
-
-  <form method="post" enctype="multipart/form-data"
-        onsubmit="this.querySelector('button').innerText='Aly is thinking… 🧠';">
-
-    <input type="hidden" name="mode" id="mode" value="web">
-
-    <div id="web">
-      <input name="url" placeholder="https://example.com">
-    </div>
-
-    <div id="text" class="hidden">
-      <textarea name="text" rows="6" placeholder="Paste text here…"></textarea>
-    </div>
-
-    <div id="audio" class="hidden">
-      <input type="file" name="audio" accept=".mp3,.wav,.m4a">
-      <div class="meta">Short audio works best (speech, podcasts, notes)</div>
-    </div>
-
-    <input name="language" placeholder="Translate to (e.g. Chinese, Japanese, French)">
-
-    <button type="submit">Translate 🚀</button>
-  </form>
-
-  {% if error %}
-    <div class="error">⚠️ {{ error }}</div>
-  {% endif %}
-
-  {% if result %}
-    <hr>
-    <h3>🎉 Result</h3>
-    <pre>{{ result }}</pre>
-    <div class="meta">
-      {{ char_count }} characters • {{ remaining }} uses left today
-    </div>
-  {% endif %}
-
-  <footer>© 2026 Aly • Built with curiosity ☕</footer>
-</div>
-
 <script>
 function showTab(tab, el) {
-  document.getElementById("web").classList.add("hidden");
-  document.getElementById("text").classList.add("hidden");
-  document.getElementById("audio").classList.add("hidden");
-
+  ["web","text","audio"].forEach(t => {
+    document.getElementById(t).classList.add("hidden");
+  });
   document.getElementById(tab).classList.remove("hidden");
   document.getElementById("mode").value = tab;
 
@@ -178,6 +208,70 @@ function showTab(tab, el) {
   el.classList.add("active");
 }
 </script>
+</head>
+
+<body>
+<div class="container">
+  <div class="card">
+
+    <div class="header">
+      <h1>Aly</h1>
+      <p>Translate webpages, text, and audio into any language.</p>
+    </div>
+
+    <div class="tabs">
+      <div class="tab active" onclick="showTab('web', this)">Webpage</div>
+      <div class="tab" onclick="showTab('text', this)">Text</div>
+      <div class="tab" onclick="showTab('audio', this)">Audio</div>
+    </div>
+
+    <form method="post" enctype="multipart/form-data">
+      <input type="hidden" name="mode" id="mode" value="web">
+
+      <div id="web">
+        <div class="label">Webpage URL</div>
+        <input name="url" placeholder="https://example.com">
+        <div class="hint">Best for articles, blogs, documentation</div>
+      </div>
+
+      <div id="text" class="hidden">
+        <div class="label">Text</div>
+        <textarea name="text" placeholder="Paste text to translate"></textarea>
+      </div>
+
+      <div id="audio" class="hidden">
+        <div class="label">Audio file</div>
+        <input type="file" name="audio" accept=".mp3,.wav,.m4a">
+        <div class="hint">Speech audio works best</div>
+      </div>
+
+      <div class="label">Target language</div>
+      <input name="language" placeholder="e.g. Japanese, French, Chinese">
+
+      <button type="submit">Translate</button>
+    </form>
+
+    {% if error %}
+      <div class="error">{{ error }}</div>
+    {% endif %}
+
+    {% if result %}
+      <div class="result">
+        <pre>{{ result }}</pre>
+        <div class="meta">
+          {{ char_count }} characters • {{ remaining }} requests left today
+        </div>
+      </div>
+    {% endif %}
+
+  </div>
+
+  <footer>
+    © 2026 Aly • Built for real-world translation
+  </footer>
+</div>
+</body>
+</html>
 """
 
 # --------------------
@@ -201,36 +295,33 @@ def home():
     if request.method == "POST":
         now = time.time()
         if now - LAST_REQUEST_TIME < RATE_LIMIT_SECONDS:
-            return render_template_string(
-                HTML, error="Slow down 😅 Give Aly a second.", remaining=remaining
-            )
+            error = "Please wait a moment before submitting again."
+            return render_template_string(HTML, error=error, remaining=remaining)
+
         LAST_REQUEST_TIME = now
 
         if remaining <= 0:
-            return render_template_string(
-                HTML, error="Aly needs a rest 💤 Come back tomorrow!", remaining=0
-            )
+            error = "Daily limit reached. Please come back tomorrow."
+            return render_template_string(HTML, error=error, remaining=0)
 
         mode = request.form.get("mode")
         target_language = request.form.get("language", "").strip()
 
         if not target_language:
-            return render_template_string(
-                HTML, error="Tell Aly which language you want 😊", remaining=remaining
-            )
+            error = "Please specify a target language."
+            return render_template_string(HTML, error=error, remaining=remaining)
 
         try:
-            # -------- WEB --------
             if mode == "web":
                 url = request.form.get("url", "").strip()
                 if not url:
-                    raise ValueError("Please enter a webpage URL.")
+                    raise ValueError("Webpage URL is required.")
 
                 r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
                 r.raise_for_status()
 
                 soup = BeautifulSoup(r.text, "html.parser")
-                for tag in soup(["script", "style", "noscript", "header", "footer", "nav"]):
+                for tag in soup(["script","style","noscript","header","footer","nav"]):
                     tag.decompose()
 
                 content = soup.find("article") or soup.find("main")
@@ -238,13 +329,11 @@ def home():
                     content.stripped_strings if content else soup.stripped_strings
                 )
 
-            # -------- TEXT --------
             elif mode == "text":
                 text = request.form.get("text", "").strip()
                 if not text:
-                    raise ValueError("Please paste some text.")
+                    raise ValueError("Please provide text to translate.")
 
-            # -------- AUDIO --------
             elif mode == "audio":
                 audio = request.files.get("audio")
                 if not audio:
@@ -259,7 +348,7 @@ def home():
                     text = transcript.text
 
             else:
-                raise ValueError("Unknown mode.")
+                raise ValueError("Invalid mode.")
 
             text = text[:MAX_CHARS]
             char_count = len(text)
@@ -271,7 +360,6 @@ def home():
 
             result = ai.output_text
 
-            # ---- Track usage ----
             USAGE[ip]["count"] += 1
             remaining -= 1
             log_usage(ip, mode, char_count)
@@ -287,8 +375,5 @@ def home():
         remaining=remaining
     )
 
-# --------------------
-# Run (Docker / Render)
-# --------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
