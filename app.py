@@ -1,215 +1,327 @@
-import os, time, csv, tempfile, subprocess
-from datetime import date, datetime
+import time
+import tempfile
+from datetime import date
 
 import requests
 from bs4 import BeautifulSoup
 from flask import Flask, request, render_template_string, send_file
 from openai import OpenAI
+from io import BytesIO
 
 # --------------------
 # App setup
 # --------------------
 app = Flask(__name__)
-client = OpenAI()
+client = OpenAI()  # Uses OPENAI_API_KEY from environment
 
-MAX_CHARS = 3000
-DAILY_LIMIT = 10
+MAX_CHARS = 2000
 RATE_LIMIT_SECONDS = 4
-
 LAST_REQUEST_TIME = 0
-USAGE = {}
+
+# Store last result for download (MVP-safe)
+LAST_TRANSLATION = ""
 
 # --------------------
-# Usage logging
-# --------------------
-def log_usage(ip, mode, chars):
-    with open("usage_log.csv", "a", newline="", encoding="utf-8") as f:
-        csv.writer(f).writerow([
-            datetime.utcnow().isoformat(), ip, mode, chars
-        ])
-
-# --------------------
-# HTML (Professional SaaS)
+# HTML — Professional Creator UI
 # --------------------
 HTML = """
 <!doctype html>
 <html>
 <head>
-<title>Aly — AI Translator</title>
+<meta charset="utf-8">
+<title>Aly — Creator Translator</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
+
 <style>
-body{font-family:Inter,system-ui;background:#f8fafc;margin:0}
-.container{max-width:900px;margin:50px auto;padding:20px}
-.card{background:#fff;border-radius:14px;border:1px solid #e5e7eb;padding:32px}
-h1{margin:0}
-.tabs{display:flex;gap:10px;border-bottom:1px solid #e5e7eb;margin:20px 0}
-.tab{padding:10px 14px;cursor:pointer;color:#64748b}
-.tab.active{color:#2563eb;border-bottom:2px solid #2563eb}
-input,textarea{width:100%;padding:12px;border:1px solid #e5e7eb;border-radius:8px}
-textarea{min-height:120px}
-button{margin-top:20px;padding:12px 18px;background:#2563eb;color:#fff;border:none;border-radius:8px;font-weight:600}
-pre{background:#f9fafb;border-radius:8px;padding:16px;white-space:pre-wrap}
-.hidden{display:none}
-.meta{font-size:12px;color:#64748b;margin-top:8px}
-.error{background:#fee2e2;color:#991b1b;padding:12px;border-radius:8px;margin-top:16px}
-footer{text-align:center;margin-top:30px;font-size:12px;color:#64748b}
+:root {
+  --bg: #f8fafc;
+  --card: #ffffff;
+  --text: #0f172a;
+  --muted: #64748b;
+  --border: #e5e7eb;
+  --primary: #2563eb;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+.container {
+  max-width: 760px;
+  margin: 64px auto;
+  padding: 0 20px;
+}
+.card {
+  background: var(--card);
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  padding: 32px;
+}
+.header h1 {
+  margin: 0;
+  font-size: 28px;
+}
+.header p {
+  margin-top: 6px;
+  color: var(--muted);
+}
+.tabs {
+  display: flex;
+  gap: 8px;
+  border-bottom: 1px solid var(--border);
+  margin: 24px 0;
+}
+.tab {
+  padding: 10px 14px;
+  font-size: 14px;
+  cursor: pointer;
+  color: var(--muted);
+}
+.tab.active {
+  color: var(--primary);
+  border-bottom: 2px solid var(--primary);
+}
+.label {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+input, textarea {
+  width: 100%;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  font-size: 14px;
+}
+textarea {
+  resize: vertical;
+  min-height: 120px;
+}
+button {
+  margin-top: 20px;
+  padding: 12px 18px;
+  border-radius: 8px;
+  border: none;
+  background: var(--primary);
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+}
+.actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
+.secondary {
+  background: white;
+  color: var(--primary);
+  border: 1px solid var(--border);
+}
+.hidden { display: none; }
+.error {
+  margin-top: 20px;
+  padding: 12px;
+  border-radius: 8px;
+  background: #fef2f2;
+  color: #991b1b;
+}
+pre {
+  background: #f9fafb;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  white-space: pre-wrap;
+}
+footer {
+  text-align: center;
+  margin-top: 36px;
+  font-size: 12px;
+  color: var(--muted);
+}
 </style>
+
 <script>
-function tab(id,el){
-  ["web","text","audio","video"].forEach(x=>document.getElementById(x).classList.add("hidden"));
-  document.getElementById(id).classList.remove("hidden");
-  document.getElementById("mode").value=id;
-  document.querySelectorAll(".tab").forEach(t=>t.classList.remove("active"));
+function showTab(tab, el) {
+  ["web","text","audio"].forEach(t =>
+    document.getElementById(t).classList.add("hidden")
+  );
+  document.getElementById(tab).classList.remove("hidden");
+  document.getElementById("mode").value = tab;
+  document.querySelectorAll(".tab").forEach(t =>
+    t.classList.remove("active")
+  );
   el.classList.add("active");
+}
+
+function copyResult() {
+  const text = document.getElementById("resultText").innerText;
+  navigator.clipboard.writeText(text);
+  alert("Copied to clipboard");
 }
 </script>
 </head>
 
 <body>
 <div class="container">
-<div class="card">
-<h1>Aly</h1>
-<p>Translate text, websites, audio & video into any language.</p>
+  <div class="card">
 
-<div class="tabs">
-<div class="tab active" onclick="tab('web',this)">Web</div>
-<div class="tab" onclick="tab('text',this)">Text</div>
-<div class="tab" onclick="tab('audio',this)">Audio</div>
-<div class="tab" onclick="tab('video',this)">Video</div>
-</div>
+    <div class="header">
+      <h1>Aly</h1>
+      <p>Translation tools built for content creators.</p>
+    </div>
 
-<form method="post" enctype="multipart/form-data">
-<input type="hidden" name="mode" id="mode" value="web">
+    <div class="tabs">
+      <div class="tab active" onclick="showTab('web', this)">Webpage</div>
+      <div class="tab" onclick="showTab('text', this)">Text</div>
+      <div class="tab" onclick="showTab('audio', this)">Audio</div>
+    </div>
 
-<div id="web">
-<input name="url" placeholder="https://example.com">
-</div>
+    <form method="post" enctype="multipart/form-data">
+      <input type="hidden" name="mode" id="mode" value="web">
 
-<div id="text" class="hidden">
-<textarea name="text" placeholder="Paste text"></textarea>
-</div>
+      <div id="web">
+        <div class="label">Webpage URL</div>
+        <input name="url" placeholder="https://example.com">
+      </div>
 
-<div id="audio" class="hidden">
-<input type="file" name="audio" accept=".mp3,.wav,.m4a">
-</div>
+      <div id="text" class="hidden">
+        <div class="label">Text</div>
+        <textarea name="text" placeholder="Paste text to translate"></textarea>
+      </div>
 
-<div id="video" class="hidden">
-<input type="file" name="video" accept=".mp4,.mov,.mkv">
-</div>
+      <div id="audio" class="hidden">
+        <div class="label">Audio file</div>
+        <input type="file" name="audio" accept=".mp3,.wav,.m4a">
+      </div>
 
-<input name="language" placeholder="Target language (e.g. Japanese)">
-<button>Translate</button>
-</form>
+      <div class="label">Target language</div>
+      <input name="language" placeholder="e.g. Japanese, French, Chinese">
 
-{% if error %}<div class="error">{{ error }}</div>{% endif %}
+      <button type="submit">Translate</button>
+    </form>
 
-{% if result %}
-<hr>
-<pre>{{ result }}</pre>
-<div class="meta">{{ chars }} chars • {{ remaining }} left today</div>
-{% endif %}
+    {% if error %}
+      <div class="error">{{ error }}</div>
+    {% endif %}
 
-{% if srt %}
-<hr>
-<a href="/download/{{ srt }}">⬇ Download subtitles (.srt)</a>
-{% endif %}
-</div>
-<footer>© Aly • MVP v3</footer>
+    {% if result %}
+      <div style="margin-top:24px;">
+        <pre id="resultText">{{ result }}</pre>
+        <div class="actions">
+          <button class="secondary" onclick="copyResult()">Copy</button>
+          <a href="/download">
+            <button type="button" class="secondary">Download .txt</button>
+          </a>
+        </div>
+      </div>
+    {% endif %}
+
+  </div>
+
+  <footer>
+    © {{ year }} Aly • Creator Translation Tools
+  </footer>
 </div>
 </body>
 </html>
 """
 
 # --------------------
-# Route
+# Routes
 # --------------------
-@app.route("/", methods=["GET","POST"])
+@app.route("/", methods=["GET", "POST"])
 def home():
-    global LAST_REQUEST_TIME
-    ip = request.headers.get("X-Forwarded-For", request.remote_addr)
-    today = date.today().isoformat()
+    global LAST_REQUEST_TIME, LAST_TRANSLATION
+    result = None
+    error = None
 
-    if ip not in USAGE or USAGE[ip]["date"]!=today:
-        USAGE[ip]={"date":today,"count":0}
+    if request.method == "POST":
+        if time.time() - LAST_REQUEST_TIME < RATE_LIMIT_SECONDS:
+            error = "Please wait a moment before submitting again."
+            return render_template_string(HTML, error=error, year=date.today().year)
+        LAST_REQUEST_TIME = time.time()
 
-    remaining = DAILY_LIMIT - USAGE[ip]["count"]
-    error=result=srt=None
-    chars=0
+        mode = request.form.get("mode")
+        target_language = request.form.get("language", "").strip()
 
-    if request.method=="POST":
-        if time.time()-LAST_REQUEST_TIME<RATE_LIMIT_SECONDS:
-            return render_template_string(HTML,error="Please wait a moment.",remaining=remaining)
-        LAST_REQUEST_TIME=time.time()
-
-        if remaining<=0:
-            return render_template_string(HTML,error="Daily limit reached.",remaining=0)
-
-        mode=request.form.get("mode")
-        lang=request.form.get("language","").strip()
-        if not lang:
-            return render_template_string(HTML,error="Target language required.",remaining=remaining)
+        if not target_language:
+            return render_template_string(
+                HTML, error="Please specify a target language.", year=date.today().year
+            )
 
         try:
-            # WEB
-            if mode=="web":
-                r=requests.get(request.form["url"],timeout=10)
-                soup=BeautifulSoup(r.text,"html.parser")
-                for t in soup(["script","style"]): t.decompose()
-                text=" ".join(soup.stripped_strings)
+            if mode == "web":
+                url = request.form.get("url", "").strip()
+                if not url:
+                    raise ValueError("Webpage URL is required.")
+                r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+                r.raise_for_status()
+                soup = BeautifulSoup(r.text, "html.parser")
+                for tag in soup(["script","style","noscript","header","footer","nav"]):
+                    tag.decompose()
+                content = soup.find("article") or soup.find("main")
+                text = " ".join(
+                    content.stripped_strings if content else soup.stripped_strings
+                )
 
-            # TEXT
-            elif mode=="text":
-                text=request.form["text"]
+            elif mode == "text":
+                text = request.form.get("text", "").strip()
+                if not text:
+                    raise ValueError("Please provide text to translate.")
 
-            # AUDIO
-            elif mode=="audio":
-                f=request.files["audio"]
+            elif mode == "audio":
+                audio = request.files.get("audio")
+                if not audio:
+                    raise ValueError("Please upload an audio file.")
                 with tempfile.NamedTemporaryFile(delete=False) as tmp:
-                    f.save(tmp.name)
-                    text=client.audio.transcriptions.create(
-                        file=open(tmp.name,"rb"),
+                    audio.save(tmp.name)
+                    transcript = client.audio.transcriptions.create(
+                        file=open(tmp.name, "rb"),
                         model="gpt-4o-transcribe"
-                    ).text
+                    )
+                    text = transcript.text
 
-            # VIDEO → SRT
-            elif mode=="video":
-                v=request.files["video"]
-                tmpdir=tempfile.mkdtemp()
-                vpath=os.path.join(tmpdir,"v.mp4")
-                apath=os.path.join(tmpdir,"a.wav")
-                v.save(vpath)
-                subprocess.run(["ffmpeg","-i",vpath,"-ar","16000","-ac","1",apath],check=True)
-                transcript=client.audio.transcriptions.create(
-                    file=open(apath,"rb"),
-                    model="gpt-4o-transcribe"
-                ).text
-                text=transcript
-                srt=f"srt_{int(time.time())}.srt"
-                with open(srt,"w",encoding="utf-8") as f:
-                    f.write("1\n00:00:00,000 --> 99:59:59,000\n"+text)
+            else:
+                raise ValueError("Invalid mode.")
 
-            text=text[:MAX_CHARS]
-            chars=len(text)
+            text = text[:MAX_CHARS]
 
-            result=client.responses.create(
+            response = client.responses.create(
                 model="gpt-4.1-mini",
-                input=f"Translate to {lang}:\n\n{text}"
-            ).output_text
+                input=f"Translate the following text to {target_language}:\n\n{text}"
+            )
 
-            USAGE[ip]["count"]+=1
-            remaining-=1
-            log_usage(ip,mode,chars)
+            result = response.output_text
+            LAST_TRANSLATION = result
 
         except Exception as e:
-            error=str(e)
+            error = str(e)
 
     return render_template_string(
-        HTML,result=result,error=error,chars=chars,remaining=remaining,srt=srt
+        HTML,
+        result=result,
+        error=error,
+        year=date.today().year
     )
 
-@app.route("/download/<path:f>")
-def dl(f):
-    return send_file(f,as_attachment=True)
+@app.route("/download")
+def download():
+    if not LAST_TRANSLATION:
+        return "Nothing to download."
+    buffer = BytesIO()
+    buffer.write(LAST_TRANSLATION.encode("utf-8"))
+    buffer.seek(0)
+    return send_file(
+        buffer,
+        as_attachment=True,
+        download_name="aly_translation.txt",
+        mimetype="text/plain"
+    )
 
-if __name__=="__main__":
-    app.run(host="0.0.0.0",port=10000)
+# --------------------
+# Run
+# --------------------
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=10000)
