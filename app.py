@@ -1,21 +1,17 @@
 import os
 import time
 import csv
-import uuid
-import subprocess
 from datetime import date
-from io import BytesIO
 
-from flask import Flask, request, render_template_string, send_file, jsonify
-import requests
-from bs4 import BeautifulSoup
+from flask import Flask, request, render_template_string, jsonify
 from openai import OpenAI
 
 # --------------------
 # App setup
 # --------------------
-app = Flask(_name_)
-client = OpenAI()
+app = Flask(__name__)
+
+client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -23,16 +19,11 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 USAGE_LOG = "usage_log.csv"
 MAX_CHARS = 3000
 RATE_LIMIT_SECONDS = 5
-LAST_REQUEST_TIME = 0
-LAST_TRANSLATION = ""
-LAST_SRT_FILE = None
+LAST_REQUEST_TIME = {}
 
 DAILY_LIMITS = {
     "text": 5,
-    "web": 5,
-    "audio": 2,
-    "video": 1,
-    "extension": 20   # extension daily limit
+    "extension": 20
 }
 
 # --------------------
@@ -43,6 +34,7 @@ def add_cors_headers(response):
     response.headers["Access-Control-Allow-Origin"] = "*"
     response.headers["Access-Control-Allow-Headers"] = "Content-Type"
     return response
+
 
 # --------------------
 # Usage tracking
@@ -61,23 +53,31 @@ def log_usage(feature, chars, language, ip):
             ip
         ])
 
+
 def check_daily_limit(ip, feature):
     today = date.today().isoformat()
     count = 0
+
     if not os.path.exists(USAGE_LOG):
         return True
+
     with open(USAGE_LOG, "r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            if row["ip"] == ip and row["feature"] == feature and row["timestamp"].startswith(today):
+            if (
+                row["ip"] == ip
+                and row["feature"] == feature
+                and row["timestamp"].startswith(today)
+            ):
                 count += 1
+
     return count < DAILY_LIMITS.get(feature, 0)
 
+
 # --------------------
-# AI helpers
+# AI helper
 # --------------------
 def translate_text(text, language, feature, ip):
-    global LAST_TRANSLATION
     text = text[:MAX_CHARS]
 
     response = client.responses.create(
@@ -85,16 +85,10 @@ def translate_text(text, language, feature, ip):
         input=f"Translate the following text to {language}:\n\n{text}"
     )
 
-    LAST_TRANSLATION = response.output_text
+    result = response.output_text
     log_usage(feature, len(text), language, ip)
-    return LAST_TRANSLATION
+    return result
 
-def transcribe_audio(path):
-    response = client.audio.transcriptions.create(
-        file=open(path, "rb"),
-        model="gpt-4o-mini-transcribe"
-    )
-    return response.text
 
 # --------------------
 # Chrome Extension Endpoint
@@ -112,6 +106,7 @@ def extension_translate():
     result = translate_text(text, language, "extension", ip)
     return jsonify({"result": result})
 
+
 # --------------------
 # Main UI
 # --------------------
@@ -119,9 +114,9 @@ HTML = """
 <!doctype html>
 <title>Aly — Built for Creators</title>
 <style>
-body { font-family: Inter, Arial; background:#0b0d10; color:white; margin:0;}
+body { font-family: Arial; background:#0b0d10; color:white; margin:0;}
 .container { max-width:860px; margin:60px auto; padding:24px;}
-.card { background:#12151b; border-radius:18px; padding:36px; box-shadow:0 40px 80px rgba(0,0,0,.6);}
+.card { background:#12151b; border-radius:18px; padding:36px;}
 h1 { font-size:36px; font-weight:900;}
 input, textarea { width:100%; padding:14px; margin-top:10px; border-radius:12px; background:#0b0e14; border:1px solid #1f2937; color:white;}
 button { margin-top:20px; padding:14px; border-radius:14px; background:#ff4d4d; border:none; font-weight:800; cursor:pointer;}
@@ -132,11 +127,9 @@ button { margin-top:20px; padding:14px; border-radius:14px; background:#ff4d4d; 
 <div class="container">
 <div class="card">
 <h1>Aly</h1>
-<p>Translate text, audio & video into publish-ready content.</p>
+<p>Translate text into publish-ready content.</p>
 
-<form method="post" enctype="multipart/form-data">
-<input type="hidden" name="mode" value="text">
-
+<form method="post">
 <textarea name="text" placeholder="Paste text here"></textarea>
 <input name="language" placeholder="Translate to (e.g. Japanese)" required>
 <button>Translate</button>
@@ -154,37 +147,39 @@ button { margin-top:20px; padding:14px; border-radius:14px; background:#ff4d4d; 
 </div>
 """
 
+
 # --------------------
 # Web App Route
 # --------------------
-@app.route("/", methods=["GET","POST"])
+@app.route("/", methods=["GET", "POST"])
 def home():
-    global LAST_REQUEST_TIME
-
     result = None
     error = None
 
     if request.method == "POST":
-        if time.time() - LAST_REQUEST_TIME < RATE_LIMIT_SECONDS:
-            return render_template_string(HTML, error="Please wait a moment.")
-        LAST_REQUEST_TIME = time.time()
-
-        language = request.form.get("language")
         ip = request.remote_addr
+        language = request.form.get("language")
+        text = request.form.get("text", "")
 
-        if not check_daily_limit(ip, "text"):
-            return render_template_string(HTML, error="Daily limit reached.")
-
-        try:
-            text = request.form.get("text","")
-            result = translate_text(text, language, "text", ip)
-        except Exception:
-            error = "Processing failed."
+        last_time = LAST_REQUEST_TIME.get(ip, 0)
+        if time.time() - last_time < RATE_LIMIT_SECONDS:
+            error = "Please wait a moment."
+        elif not check_daily_limit(ip, "text"):
+            error = "Daily limit reached."
+        else:
+            LAST_REQUEST_TIME[ip] = time.time()
+            try:
+                result = translate_text(text, language, "text", ip)
+            except Exception as e:
+                print(e)
+                error = "Processing failed."
 
     return render_template_string(HTML, result=result, error=error)
 
+
 # --------------------
-# Run
+# Run (Render compatible)
 # --------------------
-if _name_ == "_main_":
-    app.run(host="0.0.0.0", port=10000)
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
