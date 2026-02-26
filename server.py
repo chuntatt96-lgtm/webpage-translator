@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
 
 app = FastAPI()
+
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 app.add_middleware(
@@ -15,26 +16,38 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.get("/")
+def root():
+    return {"status": "Aly Live Translator running"}
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
+
     await websocket.accept()
 
+    language = websocket.query_params.get("lang", "English")
+
     while True:
-        data = await websocket.receive_text()
-        audio_bytes = base64.b64decode(data)
+        try:
+            data = await websocket.receive_text()
 
-        with open("temp.webm", "wb") as f:
-            f.write(audio_bytes)
+            audio_bytes = base64.b64decode(data)
 
-        with open("temp.webm", "rb") as audio_file:
-            transcription = client.audio.transcriptions.create(
-                model="gpt-4o-mini-transcribe",
-                file=audio_file
+            with open("temp.webm", "wb") as f:
+                f.write(audio_bytes)
+
+            with open("temp.webm", "rb") as audio_file:
+                transcription = client.audio.transcriptions.create(
+                    model="gpt-4o-mini-transcribe",
+                    file=audio_file
+                )
+
+            translated = client.responses.create(
+                model="gpt-4.1-mini",
+                input=f"Translate this to {language}:\n\n{transcription.text}"
             )
 
-        translation = client.responses.create(
-            model="gpt-4.1-mini",
-            input=f"Translate this to Japanese:\n\n{transcription.text}"
-        )
+            await websocket.send_text(translated.output_text)
 
-        await websocket.send_text(translation.output_text)
+        except Exception as e:
+            await websocket.send_text("...")
