@@ -13,9 +13,6 @@ app = Flask(__name__)
 
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
-UPLOAD_DIR = "uploads"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-
 USAGE_LOG = "usage_log.csv"
 MAX_CHARS = 3000
 RATE_LIMIT_SECONDS = 5
@@ -65,9 +62,9 @@ def check_daily_limit(ip, feature):
         reader = csv.DictReader(f)
         for row in reader:
             if (
-                row["ip"] == ip
-                and row["feature"] == feature
-                and row["timestamp"].startswith(today)
+                row.get("ip") == ip
+                and row.get("feature") == feature
+                and row.get("timestamp", "").startswith(today)
             ):
                 count += 1
 
@@ -75,7 +72,7 @@ def check_daily_limit(ip, feature):
 
 
 # --------------------
-# AI helper
+# AI translation helper
 # --------------------
 def translate_text(text, language, feature, ip):
     text = text[:MAX_CHARS]
@@ -86,6 +83,7 @@ def translate_text(text, language, feature, ip):
     )
 
     result = response.output_text
+
     log_usage(feature, len(text), language, ip)
     return result
 
@@ -95,20 +93,25 @@ def translate_text(text, language, feature, ip):
 # --------------------
 @app.route("/extension", methods=["POST"])
 def extension_translate():
-    data = request.json
-    text = data.get("text", "")
-    language = data.get("language", "English")
-    ip = request.remote_addr
+    try:
+        data = request.json
+        text = data.get("text", "")
+        language = data.get("language", "English")
+        ip = request.remote_addr
 
-    if not check_daily_limit(ip, "extension"):
-        return jsonify({"error": "Daily extension limit reached"}), 403
+        if not check_daily_limit(ip, "extension"):
+            return jsonify({"error": "Daily extension limit reached"}), 403
 
-    result = translate_text(text, language, "extension", ip)
-    return jsonify({"result": result})
+        result = translate_text(text, language, "extension", ip)
+        return jsonify({"result": result})
+
+    except Exception as e:
+        print("Extension error:", e)
+        return jsonify({"error": "Server error"}), 500
 
 
 # --------------------
-# Main UI
+# Web UI
 # --------------------
 HTML = """
 <!doctype html>
@@ -148,9 +151,6 @@ button { margin-top:20px; padding:14px; border-radius:14px; background:#ff4d4d; 
 """
 
 
-# --------------------
-# Web App Route
-# --------------------
 @app.route("/", methods=["GET", "POST"])
 def home():
     result = None
@@ -171,7 +171,7 @@ def home():
             try:
                 result = translate_text(text, language, "text", ip)
             except Exception as e:
-                print(e)
+                print("Web error:", e)
                 error = "Processing failed."
 
     return render_template_string(HTML, result=result, error=error)
