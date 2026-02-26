@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Aly Translator",
+  "version": "1.0",
+  "description": "Translate text instantly using Aly.",
+  "permissions": [],
+  "host_permissions": [
+    "https://aly-4fof.onrender.com/*"
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  }
+}
