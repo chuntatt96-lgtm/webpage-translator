@@ -1,39 +1,65 @@
 from flask_sock import Sock
-import threading
-import queue
+from openai import OpenAI
+import tempfile
+import wave
+import struct
+import os
 
 sock = Sock()
-
-# Simple queue system for audio data
-audio_queue = queue.Queue()
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 @sock.route('/ws')
 def websocket(ws):
 
-    print("Client connected")
+    # Get language from URL
+    lang = ws.environ.get("QUERY_STRING", "")
+    target_lang = "zh"
 
-    def receive_audio():
-        while True:
-            data = ws.receive()
-            if data is None:
-                break
-            audio_queue.put(data)
+    if "lang=" in lang:
+        target_lang = lang.split("lang=")[-1]
 
-    def process_audio():
-        while True:
-            if not audio_queue.empty():
-                audio_queue.get()
+    print("Target language:", target_lang)
 
-                # 🔥 Replace this with real translation later
-                ws.send("Listening... 🎧")
+    audio_frames = []
 
-    t1 = threading.Thread(target=receive_audio)
-    t2 = threading.Thread(target=process_audio)
+    while True:
+        data = ws.receive()
+        if data is None:
+            break
 
-    t1.start()
-    t2.start()
+        audio_frames.append(data)
 
-    t1.join()
-    t2.join()
+        # Process every 50 chunks (~few seconds)
+        if len(audio_frames) > 50:
 
-    print("Client disconnected")
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_audio:
+
+                wf = wave.open(temp_audio.name, 'wb')
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(44100)
+
+                for frame in audio_frames:
+                    wf.writeframes(frame)
+
+                wf.close()
+
+                # Transcribe
+                transcript = client.audio.transcriptions.create(
+                    model="whisper-1",
+                    file=open(temp_audio.name, "rb")
+                )
+
+                # Translate
+                translation = client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": f"Translate to {target_lang}"},
+                        {"role": "user", "content": transcript.text}
+                    ]
+                )
+
+                ws.send(translation.choices[0].message.content)
+
+                audio_frames = []
+                os.remove(temp_audio.name)

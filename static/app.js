@@ -11,7 +11,11 @@ async function start() {
 
     const language = document.getElementById("language").value;
 
-    socket = new WebSocket("wss://aly-4of.onrender.com/ws?lang=" + language);
+    socket = new WebSocket(
+        (location.protocol === "https:" ? "wss://" : "ws://") +
+        location.host +
+        "/ws?lang=" + language
+    );
 
     socket.onopen = async () => {
 
