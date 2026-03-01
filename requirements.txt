@@ -1,4 +1,4 @@
-fastapi
-uvicorn[standard]
-openai
-python-multipart
+Flask==3.0.2
+flask-sock==0.7.0
+gunicorn==21.2.0
+openai==1.14.3

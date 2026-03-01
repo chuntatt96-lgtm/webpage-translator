@@ -1,53 +1,39 @@
-import os
-import base64
-from fastapi import FastAPI, WebSocket
-from fastapi.middleware.cors import CORSMiddleware
-from openai import OpenAI
+from flask_sock import Sock
+import threading
+import queue
 
-app = FastAPI()
+sock = Sock()
 
-client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+# Simple queue system for audio data
+audio_queue = queue.Queue()
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+@sock.route('/ws')
+def websocket(ws):
 
-@app.get("/")
-def root():
-    return {"status": "Aly Live Translator running"}
+    print("Client connected")
 
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
+    def receive_audio():
+        while True:
+            data = ws.receive()
+            if data is None:
+                break
+            audio_queue.put(data)
 
-    await websocket.accept()
+    def process_audio():
+        while True:
+            if not audio_queue.empty():
+                audio_queue.get()
 
-    language = websocket.query_params.get("lang", "English")
+                # 🔥 Replace this with real translation later
+                ws.send("Listening... 🎧")
 
-    while True:
-        try:
-            data = await websocket.receive_text()
+    t1 = threading.Thread(target=receive_audio)
+    t2 = threading.Thread(target=process_audio)
 
-            audio_bytes = base64.b64decode(data)
+    t1.start()
+    t2.start()
 
-            with open("temp.webm", "wb") as f:
-                f.write(audio_bytes)
+    t1.join()
+    t2.join()
 
-            with open("temp.webm", "rb") as audio_file:
-                transcription = client.audio.transcriptions.create(
-                    model="gpt-4o-mini-transcribe",
-                    file=audio_file
-                )
-
-            translated = client.responses.create(
-                model="gpt-4.1-mini",
-                input=f"Translate this to {language}:\n\n{transcription.text}"
-            )
-
-            await websocket.send_text(translated.output_text)
-
-        except Exception as e:
-            await websocket.send_text("...")
+    print("Client disconnected")
